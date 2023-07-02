@@ -115,10 +115,10 @@ def main():
             data_ph.append(phases[i])
 
             data_in.append(np.hstack([
-                desired_root_pos.ravel(),
-                desired_root_rot.ravel(),
-                local_pos.ravel(),
-                local_vel.ravel(),
+                desired_root_pos.ravel(), # 0 ~ 9
+                desired_root_rot.ravel(), # 10 ~ 19
+                local_pos.ravel(), # 20 ~ 67
+                local_vel.ravel(), # 68 ~ 115
                 ]))
 
             next_root_pos = inv_rot.apply(root_position[i+1] - root_position[i])
@@ -130,16 +130,32 @@ def main():
             next_local_rotation = (root_rotation_inv[i+1] * R.from_quat(joint_orientation[i+1])).as_quat()
 
             data_out.append(np.hstack([
-                next_root_pos.ravel(),
-                next_root_rot.ravel(),
-                dphase,
-                next_local_rotation.ravel()
+                next_root_pos.ravel(), # 0 ~ 1
+                next_root_rot.ravel(), # 2 ~ 4
+                dphase, # 5 
+                next_local_rotation.ravel() # 6 ~ 69
                 ]))
     
     data_ph = np.array(data_ph)
     data_in = np.array(data_in)
     data_out = np.array(data_out)
-    np.savez("processed_data.npz", data_ph=data_ph, data_in=data_in, data_out=data_out)
+
+    in_mean, in_std = data_in.mean(axis=0), data_in.std(axis=0)
+    in_std[0:10] = in_std[0:10].mean()
+    in_std[10:20] = in_std[10:20].mean()
+    in_std[20:68] = in_std[20:68].mean()
+    in_std[69:116] = in_std[69:116].mean()
+    data_in = (data_in - in_mean) / in_std
+
+    out_mean, out_std = data_out.mean(axis=0), data_out.std(axis=0)
+    out_std[0:2] = out_std[0:2].mean()
+    out_std[2:5] = out_std[2:5].mean()
+    out_std[6:70] = out_std[6:70].mean()
+    data_out = (data_out - out_mean) / out_std
+
+    np.savez("processed_data.npz", data_ph=data_ph, data_in=data_in, data_out=data_out
+        ,in_mean=in_mean, in_std=in_std, out_mean=out_mean, out_std=out_std)
+
 
 if __name__ == "__main__":
     main()
