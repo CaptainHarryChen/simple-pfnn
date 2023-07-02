@@ -3,6 +3,9 @@ from typing import List
 from bvh_loader import BVHMotion
 from scipy.spatial.transform import Rotation as R
 from physics_warpper import PhysicsInfo
+import numpy as np
+from model import SimplePFNN
+from preprocess import calc_rotation
 
 class PDController:
     def __init__(self, viewer) -> None:
@@ -33,19 +36,31 @@ class CharacterController():
         self.motions = []
         # 添加motion
         self.motions.append(BVHMotion(bvh_file_name='./motion_material/kinematic_motion/long_walk_.bvh'))
+        joint_translation, joint_orientation = self.motions[0].batch_forward_kinematics(frame_id_list=[0])
         
-        # 下面是你可能会需要的成员变量，只是一个例子形式
-        # 当然，你可以任意编辑，来符合你的要求
         # 当前角色的参考root位置
-        self.cur_root_pos = None
+        self.cur_root_pos = joint_translation[0][0].copy()
+        self.cur_root_pos[[0,2]] = 0
         # 当前角色的参考root旋转
-        self.cur_root_rot = None
-        
-        # 当前角色处于正在跑的BVH的第几帧
-        self.cur_frame = 0
-        
+        self.cur_root_rot = R.identity().as_quat()
+        # 
+        self.cur_phase = 0.
 
+        self.cur_joint_translation = joint_translation[0].copy()
+        self.cur_local_pos = joint_translation[0].copy()
+        self.cur_local_pos[:, 0] -= self.cur_local_pos[0, 0]
+        self.cur_local_pos[:, 2] -= self.cur_local_pos[0, 2]
+        self.cur_local_vel = np.zeros_like(self.cur_local_pos)
+
+        self.model = SimplePFNN(116, 69)
+        self.model.load("checkpoints/model_0.npz")
+        with np.load("processed_data.npz") as f:
+            self.in_mean = f["in_mean"]
+            self.in_std = f["in_std"]
+            self.out_mean = f["out_mean"]
+            self.out_std = f["out_std"]
     
+
     def update_state(self, 
                      desired_pos_list, 
                      desired_rot_list,
@@ -68,19 +83,50 @@ class CharacterController():
             1. 注意应该利用的期望位置和期望速度应该都是在XoZ平面内，期望旋转和期望角速度都是绕Y轴的旋转。其他的项没有意义
 
         '''
-        # 一个简单的例子，循环播放第0个动画第0帧，不会响应输入信号
-        # print(desired_pos_list[1] - desired_pos_list[0], desired_vel_list[0])
-        motion = self.motions[0]
-        motion.adjust_joint_name(self.viewer.joint_name)
-        joint_name = motion.joint_name
-        
-        joint_translation, joint_orientation = motion.batch_forward_kinematics(root_pos=motion.joint_position[0][0], frame_id_list=[self.cur_frame])
-        joint_translation = joint_translation[0]
-        joint_orientation = joint_orientation[0]
-        self.cur_frame = (self.cur_frame + 1) % motion.motion_length
-        
+        across = (self.cur_joint_translation[11] - self.cur_joint_translation[14]) + (self.cur_joint_translation[1] - self.cur_joint_translation[4])
+        across = across / np.linalg.norm(across, axis=-1, keepdims=True)
+        forward = np.cross(across, np.array([[0,1,0]]))
+        forward = forward / np.linalg.norm(forward, axis=-1, keepdims=True)
+
+        inv_rot = R.from_quat(self.cur_root_rot).inv()
+        d_root_pos = desired_pos_list[1:, :] - desired_pos_list[0:1, :]
+        d_root_pos = inv_rot.apply(d_root_pos)
+        d_root_dir = (R.from_quat(desired_rot_list[0]).inv() * R.from_quat(desired_rot_list[1:6, :])).apply(np.array([0,0,1]))
+        d_root_pos = d_root_pos[:, [0, 2]]
+        d_root_dir = d_root_dir[:, [0, 2]]
+
+        X = np.hstack([
+                d_root_pos.ravel(), # 0 ~ 9
+                d_root_dir.ravel(), # 10 ~ 19
+                self.cur_local_pos.ravel(), # 20 ~ 67
+                self.cur_local_vel.ravel(), # 68 ~ 115
+                ]).reshape(1,-1)
+        X = (X - self.in_mean) / self.in_std
+        phase = np.array([[self.cur_phase]])
+            
+        pred = self.model(X, phase)
+        pred = pred * self.out_std + self.out_mean
+        pred = pred[0]
+
+        next_root_pos = pred[0:2]
+        self.cur_root_pos[[0, 2]] += next_root_pos
+        next_root_dir = pred[2:4]
+        self.cur_root_rot = (R.from_quat(self.cur_root_rot) * calc_rotation(np.array([0,0,1]), np.array([next_root_dir[0], 0, next_root_dir[1]]))).as_quat()
+        dphase = pred[4]
+        self.cur_phase += dphase
+        if self.cur_phase > 1:
+            self.cur_phase -= 1
+        next_local_rotation = R.from_quat(pred[5:69].reshape(-1, 4))
+
+        joint_orientation = (R.from_quat(self.cur_root_rot) * next_local_rotation).as_quat()
+        joint_translation = np.zeros_like(self.cur_joint_translation)
+        joint_translation[0] = self.cur_root_pos
+        for i in range(1, len(joint_translation)):
+            pi = self.motions[0].joint_parent[i]
+            parent_orientation = R.from_quat(joint_orientation[pi]) 
+            joint_translation[i] = joint_translation[pi] + parent_orientation.apply(self.motions[0].joint_position[0][i])
    
-        return joint_name, joint_translation, joint_orientation
+        return self.motions[0].joint_name, joint_translation, joint_orientation
     
 
     def sync_controller_and_character(self, character_state):

@@ -3,7 +3,7 @@ from model import SimplePFNN
 from dataloader import DataLoader, DataSet
 
 total_epoch = 10
-learning_rate = 0.001
+learning_rate = 0.01
 batch_size = 32
 
 
@@ -21,7 +21,7 @@ def train(start_epoch=None):
     dataloader = DataLoader(dataset, batch_size=batch_size)
 
     input_dim = 116
-    output_dim = 70
+    output_dim = 69
     model = SimplePFNN(input_dim, output_dim)
     if start_epoch != None:
         model.load(f"./checkpoints/model_{start_epoch}.npz")
@@ -44,4 +44,4 @@ def train(start_epoch=None):
 
 
 if __name__ == "__main__":
-    train(start_epoch=1)
+    train(start_epoch=None)

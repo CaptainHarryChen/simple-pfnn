@@ -112,6 +112,6 @@ class SimplePFNN:
 
 if __name__ == "__main__":
     input_dim = 116
-    output_dim = 70
+    output_dim = 69
 
     model = SimplePFNN(input_dim, output_dim)

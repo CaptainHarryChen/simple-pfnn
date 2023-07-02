@@ -102,9 +102,9 @@ def main():
             inv_rot = root_rotation_inv[i]
             window = list(range(i + delta_frame, i + lookahead_frame + delta_frame, delta_frame))
             desired_root_pos = inv_rot.apply(root_position[window] - root_position[i])
-            desired_root_rot = R.as_euler(inv_rot * R.from_quat(root_rotation[window]), "XYZ")
+            desired_root_dir = inv_rot.apply(forward[window])
             desired_root_pos = desired_root_pos[:, [0,2]]
-            desired_root_rot = desired_root_rot[:, [0,2]]
+            desired_root_dir = desired_root_dir[:, [0,2]]
 
             local_pos = joint_translation[i].copy()
             local_pos[:, 0] -= local_pos[0][0]
@@ -116,14 +116,15 @@ def main():
 
             data_in.append(np.hstack([
                 desired_root_pos.ravel(), # 0 ~ 9
-                desired_root_rot.ravel(), # 10 ~ 19
+                desired_root_dir.ravel(), # 10 ~ 19
                 local_pos.ravel(), # 20 ~ 67
                 local_vel.ravel(), # 68 ~ 115
                 ]))
 
             next_root_pos = inv_rot.apply(root_position[i+1] - root_position[i])
-            next_root_rot = R.as_euler(inv_rot * R.from_quat(root_rotation[i+1]), "XYZ")
+            next_root_dir = inv_rot.apply(forward[i+1])
             next_root_pos = next_root_pos[[0,2]]
+            next_root_dir = next_root_dir[[0,2]]
             dphase = phases[i+1] - phases[i]
             if dphase < 0:
                 dphase += 1
@@ -131,9 +132,9 @@ def main():
 
             data_out.append(np.hstack([
                 next_root_pos.ravel(), # 0 ~ 1
-                next_root_rot.ravel(), # 2 ~ 4
-                dphase, # 5 
-                next_local_rotation.ravel() # 6 ~ 69
+                next_root_dir.ravel(), # 2 ~ 3
+                dphase, # 4 
+                next_local_rotation.ravel() # 5 ~ 68
                 ]))
     
     data_ph = np.array(data_ph)
@@ -149,8 +150,8 @@ def main():
 
     out_mean, out_std = data_out.mean(axis=0), data_out.std(axis=0)
     out_std[0:2] = out_std[0:2].mean()
-    out_std[2:5] = out_std[2:5].mean()
-    out_std[6:70] = out_std[6:70].mean()
+    out_std[2:4] = out_std[2:4].mean()
+    out_std[5:69] = out_std[5:69].mean()
     data_out = (data_out - out_mean) / out_std
 
     np.savez("processed_data.npz", data_ph=data_ph, data_in=data_in, data_out=data_out
