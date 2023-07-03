@@ -1,3 +1,4 @@
+import MoCCASimuBackend
 from bvh_loader import BVHMotion
 from scipy.spatial.transform import Rotation as R
 import numpy as np
@@ -24,12 +25,11 @@ def calc_rotation(A, B):
         if np.dot(A, B) < 0:
             rotation_axis = np.cross(A, [0,0,1])
         else:
-            rot = R.identity()
-    else:
-        cos_angle = np.dot(A, B)
-        sin_angle = np.linalg.norm(rotation_axis)
-        angle = np.arctan2(sin_angle, cos_angle)
-        rot = R.from_rotvec(angle * rotation_axis / sin_angle)
+            return R.identity()
+    cos_angle = np.dot(A, B)
+    sin_angle = np.linalg.norm(rotation_axis)
+    angle = np.arctan2(sin_angle, cos_angle)
+    rot = R.from_rotvec(angle * rotation_axis / sin_angle)
     return rot
 
 
@@ -74,12 +74,19 @@ def calc_phase(joint_translation, joint_orientation, threshold = 0.01, window_ha
 
 
 def main():
+    sceneloader = MoCCASimuBackend.ODESim.JsonSceneLoader()
+    scene = sceneloader.load_from_file('stdhuman-scene.json')
+    character = scene.character0
+    joint_name = ['RootJoint'] + character.joint_info.joint_names()
+
     data_ph = []
     data_in = []
     data_out = []
     for bvh_file_name in bvh_data_list:
         # 读取motion数据
         motion = BVHMotion(bvh_file_name=bvh_file_name)
+        motion.adjust_joint_name(joint_name)
+
         joint_translation, joint_orientation = motion.batch_forward_kinematics()
         # 计算相位
         phases = calc_phase(joint_translation, joint_orientation)
@@ -92,7 +99,7 @@ def main():
         forward = forward / np.linalg.norm(forward, axis=-1, keepdims=True)
 
         def calc_dir(x):
-            return calc_rotation(x, np.array([0, 1, 0])).as_quat()
+            return calc_rotation(np.array([0,0,1]), x).as_quat()
         root_rotation = np.apply_along_axis(calc_dir, -1, forward)
         root_position = joint_translation[:, 0]
         root_rotation_inv = R.from_quat(root_rotation).inv()
@@ -105,6 +112,7 @@ def main():
             desired_root_dir = inv_rot.apply(forward[window])
             desired_root_pos = desired_root_pos[:, [0,2]]
             desired_root_dir = desired_root_dir[:, [0,2]]
+            desired_root_dir = desired_root_dir / np.linalg.norm(desired_root_dir, axis=-1, keepdims=True)
 
             local_pos = joint_translation[i].copy()
             local_pos[:, 0] -= local_pos[0][0]
@@ -125,10 +133,12 @@ def main():
             next_root_dir = inv_rot.apply(forward[i+1])
             next_root_pos = next_root_pos[[0,2]]
             next_root_dir = next_root_dir[[0,2]]
+            next_root_dir = next_root_dir / np.linalg.norm(next_root_dir, axis=-1, keepdims=True)
             dphase = phases[i+1] - phases[i]
             if dphase < 0:
                 dphase += 1
             next_local_rotation = (root_rotation_inv[i+1] * R.from_quat(joint_orientation[i+1])).as_quat()
+            # next_local_rotation = joint_orientation[i+1]
 
             data_out.append(np.hstack([
                 next_root_pos.ravel(), # 0 ~ 1
