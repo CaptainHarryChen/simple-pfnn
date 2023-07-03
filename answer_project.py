@@ -52,7 +52,7 @@ class CharacterController():
         # self.cur_data_idx = 0
 
         self.model = SimplePFNN(116, 69)
-        self.model.load("checkpoints/model_0.npz")
+        self.model.load("checkpoints/model_1.npz")
 
         with np.load("processed_data.npz") as f:
             self.in_mean = f["in_mean"]
@@ -94,7 +94,7 @@ class CharacterController():
         root_position, root_rotation, forward = self.get_cur_state()
 
         inv_rot = root_rotation.inv()
-        d_root_pos = desired_pos_list[1:, :] - desired_pos_list[0:1, :]
+        d_root_pos = desired_pos_list[1:, :] - root_position
         d_root_pos = inv_rot.apply(d_root_pos)
         d_root_dir = (inv_rot * R.from_quat(desired_rot_list[1:6, :])).apply(np.array([0,0,1]))
         d_root_pos = d_root_pos[:, [0, 2]]
@@ -144,6 +144,12 @@ class CharacterController():
             pi = self.motions[0].joint_parent[i]
             parent_orientation = R.from_quat(joint_orientation[pi]) 
             joint_translation[i] = joint_translation[pi] + parent_orientation.apply(self.motions[0].joint_position[0][i])
+
+        self.cur_local_pos = joint_translation.copy()
+        self.cur_local_pos[:, 0] -= self.cur_local_pos[0][0]
+        self.cur_local_pos[:, 2] -= self.cur_local_pos[0][2]
+        self.cur_local_pos = root_rotation.inv().apply(self.cur_local_pos)
+        self.cur_local_vel = root_rotation.inv().apply(joint_translation - self.cur_joint_translation)
         self.cur_joint_translation = joint_translation
 
         return self.motions[0].joint_name, joint_translation, joint_orientation

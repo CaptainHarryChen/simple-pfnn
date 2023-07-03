@@ -32,6 +32,7 @@ class DataLoader:
         if self.index >= len(self.dataset):
             raise StopIteration
         value = self.dataset[self.rand_idx[self.index:self.index + self.batch_size]]
+        # value = self.dataset[self.rand_idx[345:345 + self.batch_size]]
         self.index += self.batch_size
         return value
     

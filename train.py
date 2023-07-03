@@ -4,7 +4,7 @@ from dataloader import DataLoader, DataSet
 
 total_epoch = 10
 learning_rate = 0.01
-batch_size = 32
+batch_size = 64
 
 
 def SGD_update(model:SimplePFNN):
