@@ -152,16 +152,24 @@ def main():
     data_out = np.array(data_out)
 
     in_mean, in_std = data_in.mean(axis=0), data_in.std(axis=0)
-    in_std[0:10] = in_std[0:10].mean()
-    in_std[10:20] = in_std[10:20].mean()
-    in_std[20:68] = in_std[20:68].mean()
-    in_std[69:116] = in_std[69:116].mean()
+    # 
+    in_std[0:10:2] = in_std[0:10:2].mean()
+    in_std[1:11:2] = in_std[1:11:2].mean()
+    in_std[10:20:2] = in_std[10:20:2].mean()
+    in_std[11:21:2] = in_std[11:21:2].mean()
+    in_std[20:68:2] = in_std[20:68:2].mean()
+    in_std[21:69:2] = in_std[21:69:2].mean()
+    in_std[69:116:2] = in_std[69:116:2].mean()
+    in_std[70:117:2] = in_std[70:117:2].mean()
     data_in = (data_in - in_mean) / in_std
 
     out_mean, out_std = data_out.mean(axis=0), data_out.std(axis=0)
-    out_std[0:2] = out_std[0:2].mean()
-    out_std[2:4] = out_std[2:4].mean()
-    out_std[5:69] = out_std[5:69].mean()
+    out_std[0:2:2] = out_std[0:2:2].mean()
+    out_std[1:3:2] = out_std[1:3:2].mean()
+    out_std[2:4:2] = out_std[2:4:2].mean()
+    out_std[3:5:2] = out_std[3:5:2].mean()
+    out_std[5:69:2] = out_std[5:69:2].mean()
+    out_std[6:70:2] = out_std[6:70:2].mean()
     data_out = (data_out - out_mean) / out_std
 
     np.savez("processed_data.npz", data_ph=data_ph, data_in=data_in, data_out=data_out

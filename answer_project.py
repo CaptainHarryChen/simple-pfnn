@@ -52,7 +52,7 @@ class CharacterController():
         # self.cur_data_idx = 0
 
         self.model = SimplePFNN(116, 69)
-        self.model.load("checkpoints/model_1.npz")
+        self.model.load("checkpoints/model_8.npz")
 
         with np.load("processed_data.npz") as f:
             self.in_mean = f["in_mean"]
@@ -92,6 +92,8 @@ class CharacterController():
 
         '''
         root_position, root_rotation, forward = self.get_cur_state()
+        # print(desired_rot_list[0])
+        # print(desired_pos_list[0,[0,2]] - root_position[[0,2]])
 
         inv_rot = root_rotation.inv()
         d_root_pos = desired_pos_list[1:, :] - root_position
