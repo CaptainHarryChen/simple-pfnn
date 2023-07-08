@@ -12,7 +12,7 @@ bvh_data_list = [
 ]
 
 delta_frame = 20
-lookahead_frame = 100
+window_size = 60
 frame_time = 0.016667
 
 
@@ -36,9 +36,9 @@ def calc_rotation(A, B):
 def calc_phase(joint_translation, joint_orientation, threshold = 0.01, window_half_size = 20, eps = 1e-4):
     ph = []
 
-    # lAnkle: 03    rAnkle: 06  
-    left_v = np.linalg.norm(joint_translation[1:, 3] - joint_translation[:-1, 3], axis=1)
-    right_v = np.linalg.norm(joint_translation[1:, 6] - joint_translation[:-1, 6], axis=1)
+    # lAnkle: 08    rAnkle: 07  
+    left_v = np.linalg.norm(joint_translation[1:, 8] - joint_translation[:-1, 8], axis=1)
+    right_v = np.linalg.norm(joint_translation[1:, 7] - joint_translation[:-1, 7], axis=1)
     compare = left_v <= right_v + eps
 
     for i in range(left_v.shape[0]):
@@ -89,11 +89,11 @@ def main():
 
         joint_translation, joint_orientation = motion.batch_forward_kinematics()
         # 计算相位
-        phases = calc_phase(joint_translation, joint_orientation)
+        phase = calc_phase(joint_translation, joint_orientation)
 
         # 根节点的位置和旋转（通过腰和肩计算旋转）
-        # lHip:1   rHip:4   lShoulder:11   rShoulder:14
-        across = (joint_translation[:, 11] - joint_translation[:, 14]) + (joint_translation[:, 1] - joint_translation[:, 4])
+        # lHip:4   rHip:3   lShoulder:13   rShoulder:12
+        across = (joint_translation[:, 13] - joint_translation[:, 12]) + (joint_translation[:, 4] - joint_translation[:, 3])
         across = across / np.linalg.norm(across, axis=-1, keepdims=True)
         forward = np.cross(across, np.array([[0,1,0]]))
         forward = forward / np.linalg.norm(forward, axis=-1, keepdims=True)
@@ -101,50 +101,49 @@ def main():
         def calc_dir(x):
             return calc_rotation(np.array([0,0,1]), x).as_quat()
         root_rotation = np.apply_along_axis(calc_dir, -1, forward)
+        root_rotation_rep = R.from_quat(np.tile(root_rotation, reps=[1, joint_translation.shape[1]]).reshape(-1,4))
         root_position = joint_translation[:, 0]
-        root_rotation_inv = R.from_quat(root_rotation).inv()
 
-        # 划窗口并构造数据
-        for i in range(1, motion.motion_length - lookahead_frame - delta_frame):
-            inv_rot = root_rotation_inv[i]
-            window = list(range(i + delta_frame, i + lookahead_frame + delta_frame, delta_frame))
-            desired_root_pos = inv_rot.apply(root_position[window] - root_position[i])
-            desired_root_dir = inv_rot.apply(forward[window])
-            desired_root_pos = desired_root_pos[:, [0,2]]
-            desired_root_dir = desired_root_dir[:, [0,2]]
-            desired_root_dir = desired_root_dir / np.linalg.norm(desired_root_dir, axis=-1, keepdims=True)
+        local_positions = joint_translation.copy()
+        local_positions[:, :, 0] -= local_positions[:, 0:1, 0]
+        local_positions[:, :, 2] -= local_positions[:, 0:1, 2]
+        local_positions = root_rotation_rep.apply(local_positions.reshape(-1, 3), inverse=True).reshape(-1, joint_translation.shape[1], 3)
+        local_velocities = joint_translation[1:] - joint_translation[:-1]
+        local_velocities = root_rotation_rep[:-joint_translation.shape[1]].apply(local_velocities.reshape(-1, 3), inverse=True).reshape(-1, joint_translation.shape[1], 3)
+        local_rotations = R.as_euler(root_rotation_rep.inv() * R.from_quat(joint_orientation.reshape(-1, 4)), "XYZ").reshape(-1, joint_translation.shape[1], 3)
 
-            local_pos = joint_translation[i].copy()
-            local_pos[:, 0] -= local_pos[0][0]
-            local_pos[:, 2] -= local_pos[0][2]
-            local_pos = inv_rot.apply(local_pos)
-            local_vel = inv_rot.apply(joint_translation[i] - joint_translation[i-1])
+        root_velocity = R.from_quat(root_rotation[:-1]).apply(joint_translation[1:,0] - joint_translation[:-1, 0], inverse=True)
+        root_rvelocity = R.as_euler(R.from_quat(root_rotation[:-1]).inv() * R.from_quat(root_rotation[1:]), "XYZ")[:,1]
 
-            data_ph.append(phases[i])
+        dphase = phase[1:] - phase[:-1]
+        dphase[dphase < 0] = (1.0-phase[:-1]+phase[1:])[dphase < 0]
+
+        # 划窗口并构造数据 !!!!!!!!!!!!!!!!!!!!!
+        for i in range(window_size, motion.motion_length - window_size - 1):
+            rootposs = R.from_quat(root_rotation[i]).apply(joint_translation[i-window_size:i+window_size:delta_frame,0] - joint_translation[i,0], inverse=True)
+            rootdirs = R.from_quat(root_rotation[i]).apply(forward[i-window_size:i+window_size:delta_frame])
+    
+            data_ph.append(phase[i])
 
             data_in.append(np.hstack([
-                desired_root_pos.ravel(), # 0 ~ 9
-                desired_root_dir.ravel(), # 10 ~ 19
-                local_pos.ravel(), # 20 ~ 67
-                local_vel.ravel(), # 68 ~ 115
+                rootposs[:, 0].ravel(), rootposs[:, 2].ravel(), # 0~5, 6~11
+                rootdirs[:, 0].ravel(), rootdirs[:, 2].ravel(), # 12~17, 18~23
+                local_positions[i-1].ravel(), # 24~71
+                local_velocities[i-1].ravel(), # 72~119
                 ]))
 
-            next_root_pos = inv_rot.apply(root_position[i+1] - root_position[i])
-            next_root_dir = inv_rot.apply(forward[i+1])
-            next_root_pos = next_root_pos[[0,2]]
-            next_root_dir = next_root_dir[[0,2]]
-            next_root_dir = next_root_dir / np.linalg.norm(next_root_dir, axis=-1, keepdims=True)
-            dphase = phases[i+1] - phases[i]
-            if dphase < 0:
-                dphase += 1
-            next_local_rotation = (root_rotation_inv[i+1] * R.from_quat(joint_orientation[i+1])).as_quat()
-            # next_local_rotation = joint_orientation[i+1]
+            rootposs_next = R.from_quat(root_rotation[i+1]).apply(joint_translation[i+1:i+window_size+1:delta_frame,0] - joint_translation[i+1,0], inverse=True)
+            rootdirs_next = R.from_quat(root_rotation[i+1]).apply(forward[i+1:i+window_size+1:delta_frame])
 
             data_out.append(np.hstack([
-                next_root_pos.ravel(), # 0 ~ 1
-                next_root_dir.ravel(), # 2 ~ 3
-                dphase, # 4 
-                next_local_rotation.ravel() # 5 ~ 68
+                root_velocity[i,0].ravel(), root_velocity[i,2].ravel(), # 0,1
+                root_rvelocity[i].ravel(), # 2
+                dphase[i], # 3
+                rootposs_next[0].ravel(), rootposs_next[2].ravel(), # 4~6, 7~9
+                rootdirs_next[0].ravel(), rootdirs_next[2].ravel(), # 10~12, 13~15
+                local_positions[i].ravel(), # 16~63
+                local_velocities[i].ravel(), # 64~111
+                local_rotations[i].ravel() # 112~159
                 ]))
     
     data_ph = np.array(data_ph)
@@ -152,24 +151,19 @@ def main():
     data_out = np.array(data_out)
 
     in_mean, in_std = data_in.mean(axis=0), data_in.std(axis=0)
-    # 
-    in_std[0:10:2] = in_std[0:10:2].mean()
-    in_std[1:11:2] = in_std[1:11:2].mean()
-    in_std[10:20:2] = in_std[10:20:2].mean()
-    in_std[11:21:2] = in_std[11:21:2].mean()
-    in_std[20:68:2] = in_std[20:68:2].mean()
-    in_std[21:69:2] = in_std[21:69:2].mean()
-    in_std[69:116:2] = in_std[69:116:2].mean()
-    in_std[70:117:2] = in_std[70:117:2].mean()
+    in_std[0:6] = in_std[0:6].mean()
+    in_std[6:12] = in_std[6:12].mean()
+    in_std[12:18] = in_std[12:18].mean()
+    in_std[18:24] = in_std[18:24].mean()
+    in_std[24:72] = in_std[24:72].mean()
+    in_std[72:120] = in_std[72:120].mean()
     data_in = (data_in - in_mean) / in_std
 
     out_mean, out_std = data_out.mean(axis=0), data_out.std(axis=0)
-    out_std[0:2:2] = out_std[0:2:2].mean()
-    out_std[1:3:2] = out_std[1:3:2].mean()
-    out_std[2:4:2] = out_std[2:4:2].mean()
-    out_std[3:5:2] = out_std[3:5:2].mean()
-    out_std[5:69:2] = out_std[5:69:2].mean()
-    out_std[6:70:2] = out_std[6:70:2].mean()
+    out_std[4:10] = out_std[4:10].mean()
+    out_std[10:16] = out_std[10:16].mean()
+    out_std[16:112] = out_std[16:112].mean()
+    out_std[112:160] = out_std[112:160].mean()
     data_out = (data_out - out_mean) / out_std
 
     np.savez("processed_data.npz", data_ph=data_ph, data_in=data_in, data_out=data_out

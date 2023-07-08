@@ -2,7 +2,7 @@ import numpy as np
 from model import SimplePFNN
 from dataloader import DataLoader, DataSet
 
-total_epoch = 10
+total_epoch = 50
 learning_rate = 0.01
 batch_size = 64
 
@@ -20,8 +20,8 @@ def train(start_epoch=None):
     dataset = DataSet("processed_data.npz")
     dataloader = DataLoader(dataset, batch_size=batch_size)
 
-    input_dim = 116
-    output_dim = 69
+    input_dim = 120
+    output_dim = 160
     model = SimplePFNN(input_dim, output_dim)
     if start_epoch != None:
         model.load(f"./checkpoints/model_{start_epoch}.npz")
